@@ -89,15 +89,15 @@ def run_ltspice_simulation():
     import re
 
     # === 在这里设定计算上升时间的电压阈值范围 (V) ===
-    V_THRESHOLD_LOW = 0.045   # 起始阈值 (例如 10% 对应的电压)
-    V_THRESHOLD_HIGH = -0.045  # 结束阈值 (例如 90% 对应的电压)
+    V_THRESHOLD_LOW = -0.047   # 起始阈值 (例如 10% 对应的电压)
+    V_THRESHOLD_HIGH = 0.047  # 结束阈值 (例如 90% 对应的电压)
     # ================================================
 
     # === 在这里设定查找上升沿的时间窗口范围 (秒) ===
     # 用来避开仿真早期的不稳定状态或只针对特定的脉冲沿进行测量
     # 如果不想限制，可以设 T_WINDOW_START = 0，T_WINDOW_END = float('inf')
-    T_WINDOW_START = 0.2e-6          # 查找时间窗口起点
-    T_WINDOW_END = 0.4e-6         # 查找时间窗口终点 (设为1.5us)
+    T_WINDOW_START = 0.0e-6          # 查找时间窗口起点
+    T_WINDOW_END = 1.4e-6         # 查找时间窗口终点 (设为1.5us)
     # ================================================
 
     # runner 迭代器会遍历出所有的 (raw文件对象, log文件对象)
@@ -119,6 +119,16 @@ def run_ltspice_simulation():
             # 获取在指定时间窗口内，电压首次超过设定阈值的索引
             idx_10_arr = np.where((v_out <= v_10) & (time >= T_WINDOW_START) & (time <= T_WINDOW_END))[0]
             idx_90_arr = np.where((v_out <= v_90) & (time >= T_WINDOW_START) & (time <= T_WINDOW_END))[0]
+            
+            # --- Debug 打印 ---
+            # 你可以在终端里查看每个文件被抓取到的数组长度和具体的时间点
+            label_name = os.path.basename(raw_file_path).replace('.raw', '').replace('C1_sweep_', 'C1=')
+            print(f"[{label_name}] idx_10_arr length: {len(idx_10_arr)}, idx_90_arr length: {len(idx_90_arr)}")
+            if len(idx_10_arr) > 0:
+                print(f"    -> First passed V_10 at time: {time[idx_10_arr[0]]}")
+            if len(idx_90_arr) > 0:
+                print(f"    -> First passed V_90 at time: {time[idx_90_arr[0]]}")
+            # ------------------
             
             if len(idx_10_arr) > 0 and len(idx_90_arr) > 0:
                 idx_10 = idx_10_arr[0]
