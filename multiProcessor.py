@@ -16,7 +16,7 @@ from PyLTSpice import SimRunner, RawRead, SimCommander, LTspice
 
 # 1. 配置路径
 # 请将此路径修改为你电脑上 LTspice 的实际安装位置
-LTSPICE_EXE = r"D:\tools\SPICE\LtSpice\LTspice.exe"
+LTSPICE_EXE = r"D:\software\simulation\hardware\LtSpice\LTspice.exe"
 WORKING_DIR = r"./temp"  # 仿真文件存放目录
 ASC_FILE = "./simulation_folder/UniversalOpAmp2.asc"          # 你的电路图文件名
 
@@ -59,8 +59,8 @@ def run_ltspice_simulation():
     
     # 采用 初值-终值-步长 形式定义扫描范围：从 100e-12 (100p) 到 1e-9 (1n)，步长为 200e-12 (200p)
     c1_start = 100e-12
-    c1_stop = 100e-9
-    c1_step = 800e-12
+    c1_stop = 1e-9
+    c1_step = 100e-12
     
     # 使用 numpy.arange 生成扫描值数组
     c1_sweep_values = np.arange(c1_start, c1_stop + c1_step/2, c1_step)
@@ -81,9 +81,18 @@ def run_ltspice_simulation():
     print("扫描仿真全部完成！")
 
     # 4. 读取仿真结果并绘制折线图
-    plt.figure(figsize=(12, 7))
+    plt.figure(1, figsize=(12, 7))
     found_result = False
     
+    c1_values_list = []
+    rise_times = []
+    import re
+
+    # === 在这里设定计算上升时间的电压阈值范围 (V) ===
+    V_THRESHOLD_LOW = 0.045   # 起始阈值 (例如 10% 对应的电压)
+    V_THRESHOLD_HIGH = -0.045  # 结束阈值 (例如 90% 对应的电压)
+    # ================================================
+
     # runner 迭代器会遍历出所有的 (raw文件对象, log文件对象)
     for raw, log in runner:
         raw_file_path = str(raw)
@@ -96,17 +105,56 @@ def run_ltspice_simulation():
             time = raw_data.get_trace('time').get_wave()
             v_out = raw_data.get_trace('V(out)').get_wave()
             
+            # 使用用户设定的阈值来计算上升时间
+            v_10 = V_THRESHOLD_LOW
+            v_90 = V_THRESHOLD_HIGH
+            
+            # 获取电压首次超过设定阈值的索引
+            idx_10_arr = np.where(v_out >= v_10)[0]
+            idx_90_arr = np.where(v_out >= v_90)[0]
+            if len(idx_10_arr) > 0 and len(idx_90_arr) > 0:
+                idx_10 = idx_10_arr[0]
+                idx_90 = idx_90_arr[0]
+                rise_time = time[idx_90] - time[idx_10]
+            else:
+                rise_time = 0
+            
+            match = re.search(r'C1_sweep_([0-9.]+)([pn])', raw_file_path)
+            if match:
+                val = float(match.group(1))
+                unit = match.group(2)
+                c1_val = val * 1e-12 if unit == 'p' else val * 1e-9
+                
+                c1_values_list.append(c1_val)
+                rise_times.append(rise_time)
+            
             # 提取之前设定的文件名，用来作为画图的图例（Legend）
             label_name = os.path.basename(raw_file_path).replace('.raw', '').replace('C1_sweep_', 'C1=')
             
+            plt.figure(1)
             plt.plot(time, v_out, label=label_name)
 
     if found_result:
+        plt.figure(1)
         plt.title('Transient Response vs C1 Values')
         plt.xlabel('Time (s)')
         plt.ylabel('Voltage (V)')
         plt.grid(True)
-        plt.legend()
+        # plt.legend() # 若有多条曲线可能会遮挡，这里先保留，或者可以在实际中注释掉
+        
+        if len(c1_values_list) > 0:
+            # 根据 C1 的容值排序，确保画图时线不乱交错
+            sorted_indices = np.argsort(c1_values_list)
+            c1_values_sorted = np.array(c1_values_list)[sorted_indices]
+            rise_times_sorted = np.array(rise_times)[sorted_indices]
+            
+            plt.figure(2, figsize=(10, 6))
+            plt.plot(c1_values_sorted * 1e12, rise_times_sorted * 1e9, marker='o')
+            plt.title('Rise Time (10% to 90%) vs C1 Capacitance')
+            plt.xlabel('C1 Capacitance (pF)')
+            plt.ylabel('Rise Time (ns)')
+            plt.grid(True)
+            
         plt.show()
     else:
         print("未找到结果文件!")

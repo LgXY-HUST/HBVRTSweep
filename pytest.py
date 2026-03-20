@@ -4,7 +4,7 @@ from PyLTSpice import SimRunner, RawRead, SimCommander, LTspice
 
 # 1. 配置路径
 # 请将此路径修改为你电脑上 LTspice 的实际安装位置
-LTSPICE_EXE = r"D:\tools\SPICE\LtSpice\LTspice.exe"
+LTSPICE_EXE = r"D:\software\simulation\hardware\LtSpice\LTspice.exe"
 WORKING_DIR = r"./temp"  # 仿真文件存放目录
 ASC_FILE = "./simulation_folder/UniversalOpAmp2.asc"          # 你的电路图文件名
 
