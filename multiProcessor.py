@@ -93,6 +93,13 @@ def run_ltspice_simulation():
     V_THRESHOLD_HIGH = -0.045  # 结束阈值 (例如 90% 对应的电压)
     # ================================================
 
+    # === 在这里设定查找上升沿的时间窗口范围 (秒) ===
+    # 用来避开仿真早期的不稳定状态或只针对特定的脉冲沿进行测量
+    # 如果不想限制，可以设 T_WINDOW_START = 0，T_WINDOW_END = float('inf')
+    T_WINDOW_START = 0.2e-6          # 查找时间窗口起点
+    T_WINDOW_END = 0.4e-6         # 查找时间窗口终点 (设为1.5us)
+    # ================================================
+
     # runner 迭代器会遍历出所有的 (raw文件对象, log文件对象)
     for raw, log in runner:
         raw_file_path = str(raw)
@@ -109,9 +116,10 @@ def run_ltspice_simulation():
             v_10 = V_THRESHOLD_LOW
             v_90 = V_THRESHOLD_HIGH
             
-            # 获取电压首次超过设定阈值的索引
-            idx_10_arr = np.where(v_out >= v_10)[0]
-            idx_90_arr = np.where(v_out >= v_90)[0]
+            # 获取在指定时间窗口内，电压首次超过设定阈值的索引
+            idx_10_arr = np.where((v_out <= v_10) & (time >= T_WINDOW_START) & (time <= T_WINDOW_END))[0]
+            idx_90_arr = np.where((v_out <= v_90) & (time >= T_WINDOW_START) & (time <= T_WINDOW_END))[0]
+            
             if len(idx_10_arr) > 0 and len(idx_90_arr) > 0:
                 idx_10 = idx_10_arr[0]
                 idx_90 = idx_90_arr[0]
