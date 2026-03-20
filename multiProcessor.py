@@ -112,28 +112,59 @@ def run_ltspice_simulation():
             time = raw_data.get_trace('time').get_wave()
             v_out = raw_data.get_trace('V(out)').get_wave()
             
-            # 使用用户设定的阈值来计算上升时间
+            # 使用用户设定的阈值来计算上升/下降时间
             v_10 = V_THRESHOLD_LOW
             v_90 = V_THRESHOLD_HIGH
             
-            # 获取在指定时间窗口内，电压首次超过设定阈值的索引
-            idx_10_arr = np.where((v_out <= v_10) & (time >= T_WINDOW_START) & (time <= T_WINDOW_END))[0]
-            idx_90_arr = np.where((v_out <= v_90) & (time >= T_WINDOW_START) & (time <= T_WINDOW_END))[0]
+            # 获取在指定时间窗口内的点
+            in_window = (time >= T_WINDOW_START) & (time <= T_WINDOW_END)
+            
+            # 判断是上升沿还是下降沿
+            is_rising = v_90 > v_10
+            
+            if is_rising:
+                idx_10_arr = np.where(in_window & (v_out >= v_10))[0]
+                idx_90_arr = np.where(in_window & (v_out >= v_90))[0]
+            else:
+                idx_10_arr = np.where(in_window & (v_out <= v_10))[0]
+                idx_90_arr = np.where(in_window & (v_out <= v_90))[0]
+            
+            label_name = os.path.basename(raw_file_path).replace('.raw', '').replace('C1_sweep_', 'C1=')
+            
+            # 使用线性插值获取精确的过零点：
+            # idx_arr[0] 是“第一个越过阈值的点”，那么 idx_arr[0]-1 就是“最后一个未越过阈值的点”
+            def get_interpolated_time(idx_arr, target_v):
+                if len(idx_arr) == 0:
+                    return None
+                i = idx_arr[0]
+                # 如果这个越过阈值的点已经是数组开头，或者它前面的点不在窗口内，则无法跨点插值
+                if i == 0 or not in_window[i-1]:
+                    return time[i]
+                
+                t1, v1 = time[i-1], v_out[i-1]
+                t2, v2 = time[i], v_out[i]
+                
+                if v2 == v1:
+                    return t2
+                
+                # 线性插值公式： t = t1 + (v_target - v1) * (t2 - t1) / (v2 - v1)
+                return t1 + (target_v - v1) * (t2 - t1) / (v2 - v1)
+            
+            t_10 = get_interpolated_time(idx_10_arr, v_10)
+            t_90 = get_interpolated_time(idx_90_arr, v_90)
             
             # --- Debug 打印 ---
-            # 你可以在终端里查看每个文件被抓取到的数组长度和具体的时间点
-            label_name = os.path.basename(raw_file_path).replace('.raw', '').replace('C1_sweep_', 'C1=')
-            print(f"[{label_name}] idx_10_arr length: {len(idx_10_arr)}, idx_90_arr length: {len(idx_90_arr)}")
-            if len(idx_10_arr) > 0:
-                print(f"    -> First passed V_10 at time: {time[idx_10_arr[0]]}")
-            if len(idx_90_arr) > 0:
-                print(f"    -> First passed V_90 at time: {time[idx_90_arr[0]]}")
+            print(f"[{label_name}] Edge type: {'Rising' if is_rising else 'Falling'}")
+            if t_10 is not None and t_90 is not None:
+                print(f"    -> Crossed V_10 ({v_10}V) at exact time: {t_10:.8e}")
+                print(f"    -> Crossed V_90 ({v_90}V) at exact time: {t_90:.8e}")
+                # pass
+            else:
+                print(f"[{label_name}] WARNING: Edge not fully caught in window.")
             # ------------------
             
-            if len(idx_10_arr) > 0 and len(idx_90_arr) > 0:
-                idx_10 = idx_10_arr[0]
-                idx_90 = idx_90_arr[0]
-                rise_time = time[idx_90] - time[idx_10]
+            if t_10 is not None and t_90 is not None:
+                rise_time = abs(t_90 - t_10)
             else:
                 rise_time = 0
             
@@ -158,7 +189,8 @@ def run_ltspice_simulation():
         plt.xlabel('Time (s)')
         plt.ylabel('Voltage (V)')
         plt.grid(True)
-        # plt.legend() # 若有多条曲线可能会遮挡，这里先保留，或者可以在实际中注释掉
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='small') # 标注图例，考虑到数据较多放到图外侧
+        plt.tight_layout() # 自动调整布局，以免图例被截断
         
         if len(c1_values_list) > 0:
             # 根据 C1 的容值排序，确保画图时线不乱交错
