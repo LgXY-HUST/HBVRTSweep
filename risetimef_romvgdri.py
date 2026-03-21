@@ -30,10 +30,11 @@ def plot_waveforms(results_data):
 
     # 独立画出每一次仿真的Vd_DUT和Vs_DUT电压之差，并标注关键时间点
     for idx, res in enumerate(results_data):
-        plt.figure(f"Simulation_{idx+1}", figsize=(10, 6))
+        fig, ax1 = plt.subplots(figsize=(10, 6), num=f"Simulation_{idx+1}")
         
         time = res['time']
         v_out = res['v_out']
+        v_driver = res.get('v_driver', None)
         w_start, w_end = res['window']
         
         # 限制绘图时间范围以便于观察细节 (单位 us)
@@ -41,31 +42,51 @@ def plot_waveforms(results_data):
         time_us = time[mask] * 1e6
         v_out_window = v_out[mask]
         
-        plt.plot(time_us, v_out_window, label=r'$V_{d\_DUT} - V_{s\_DUT}$', color='b')
+        ax1.plot(time_us, v_out_window, label=r'Vds ($V_{d\_DUT} - V_{s\_DUT}$)', color='b')
+        ax1.set_xlabel(r'Time ($\mu$s)')
+        ax1.set_ylabel('Vds Voltage (V)', color='b')
+        ax1.tick_params(axis='y', labelcolor='b')
         
         # 获取标定的阈值
-        v_10 = res['v_10']
-        v_90 = res['v_90']
+        v_start_thresh = res['v_10']
+        v_end_thresh = res['v_90']
+        
+        if v_driver is not None:
+            ax2 = ax1.twinx()
+            v_driver_window = v_driver[mask]
+            ax2.plot(time_us, v_driver_window, label=r'Vdriver ($V_{g\_dri} - V_{ks}$)', color='orange', linestyle='--')
+            ax2.set_ylabel('Driver Voltage (V)', color='orange')
+            ax2.tick_params(axis='y', labelcolor='orange')
         
         if res['t_10'] is not None and res['t_90'] is not None:
             t_10_us = res['t_10'] * 1e6
             t_90_us = res['t_90'] * 1e6
             
-            plt.plot(t_10_us, v_10, 'ro', label=f'10% threshold ({v_10:.1f}V)')
-            plt.plot(t_90_us, v_90, 'go', label=f'90% threshold ({v_90:.1f}V)')
+            if v_driver is not None:
+                ax2.plot(t_10_us, v_start_thresh, 'ro', label=f'0.9 VCC2 ({v_start_thresh:.1f}V)')
+                ax2.hlines(v_start_thresh, plt.xlim()[0], t_10_us, colors='r', linestyles='dashed', alpha=0.5)
+            else:
+                ax1.plot(t_10_us, v_start_thresh, 'ro', label=f'Start Thresh ({v_start_thresh:.1f}V)')
+                
+            ax1.plot(t_90_us, v_end_thresh, 'go', label=f'0.9 VBUS ({v_end_thresh:.1f}V)')
             
             # 画辅助线 (垂直与水平)
-            plt.vlines(t_10_us, plt.ylim()[0], v_10, colors='r', linestyles='dashed', alpha=0.5)
-            plt.vlines(t_90_us, plt.ylim()[0], v_90, colors='g', linestyles='dashed', alpha=0.5)
-            plt.hlines(v_10, plt.xlim()[0], t_10_us, colors='r', linestyles='dashed', alpha=0.5)
-            plt.hlines(v_90, plt.xlim()[0], t_90_us, colors='g', linestyles='dashed', alpha=0.5)
+            ax1.axvline(t_10_us, color='r', linestyle='dashed', alpha=0.5)
+            ax1.axvline(t_90_us, color='g', linestyle='dashed', alpha=0.5)
+            ax1.hlines(v_end_thresh, plt.xlim()[0], t_90_us, colors='g', linestyles='dashed', alpha=0.5)
         
-        plt.title(f"Voltage Rise at Turn-off (VLoad={res['vload']}V, I={res['i_target']}A)\nRise Time (10%~90%) = {res['rise_time']*1e9:.2f} ns")
-        plt.xlabel(r'Time ($\mu$s)')
-        plt.ylabel('Voltage (V)')
-        plt.grid(True, linestyle='--', alpha=0.6)
-        plt.legend()
-        plt.tight_layout()
+        plt.title(f"Voltage Rise at Turn-off (VLoad={res['vload']}V, I={res['i_target']}A)\nRise Time = {res['rise_time']*1e9:.2f} ns")
+        ax1.grid(True, linestyle='--', alpha=0.6)
+        
+        # 合并图例
+        lines_1, labels_1 = ax1.get_legend_handles_labels()
+        if v_driver is not None:
+            lines_2, labels_2 = ax2.get_legend_handles_labels()
+            ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc=0)
+        else:
+            ax1.legend(loc=0)
+            
+        fig.tight_layout()
 
 def plot_rise_time_3d(results_data):
     """
@@ -132,8 +153,8 @@ def run_ltspice_simulation():
     print("正在启动 LTspice 多进程参数扫描仿真...")
     
     # 配置要扫描的 VLoad 和目标电流 I_target
-    vload_list = np.arange(150, 400 + 100/2, 100)
-    i_target_list = np.arange(2, 30 + 10/2, 20)
+    vload_list = np.arange(200, 400 + 100/2, 50)
+    i_target_list = np.arange(2, 10 + 10/2, 3)
     
     # 假设 Lload = 100uH
     Lload_val = 100e-6 
@@ -200,66 +221,78 @@ def run_ltspice_simulation():
             time = raw_data.get_trace('time').get_wave()
             
             try:
-                # 获取 dut 的电压差 (Vd_DUT - Vs_DUT)
+                # 获取 dut 的电压差 (Vds: Vd_DUT - Vs_DUT)
                 vd = raw_data.get_trace('V(vd_dut)').get_wave()
                 vs = raw_data.get_trace('V(vs_dut)').get_wave()
-                v_out = vd - vs
+                vds = vd - vs
                 
-                # 获取母线电压 VBUS 作为阈值判据依据
+                # 获取驱动的电压差 (vg_dri - vks) 作为提取起点的判据
+                vg_dri = raw_data.get_trace('V(vg_dri)').get_wave()
+                vks = raw_data.get_trace('V(vks)').get_wave()
+                v_driver = vg_dri - vks
+                
+                # 获取母线电压 VBUS 作为 Vds 阈值判据依据
                 vbus_wave = raw_data.get_trace('V(vbus)').get_wave()
-                vbus_val = vbus_wave[0] # 取第一个点即可假设恒定，或者也可以使用 np.mean(vbus_wave)
+                vbus_val = vbus_wave[0] # 取第一个点即可假设恒定
+                
+                # VCC2 从仿真文件中定义为 18V
+                vcc2_val = 18.0
                 
             except Exception as e:
                 print(f"[{os.path.basename(raw_file_path)}] 找不到波形数据: {e}")
                 continue
             
-            # 使用母线电压 VBUS 作为该组仿真的 10% 和 90% 阈值
-            v_10 = 0.1 * vbus_val
-            v_90 = 0.9 * vbus_val
+            # 使用母线电压 VBUS 的 90% 作为终点阈值，驱动电压 0.9VCC2 作为起点阈值
+            v_start_thresh = 0.9 * vcc2_val
+            v_end_thresh = 0.9 * vbus_val
             
             # 获取在指定时间窗口内的点
             in_window = (time >= T_WINDOW_START) & (time <= T_WINDOW_END)
             
-            # 寻找上升沿
-            idx_10_arr = np.where(in_window & (v_out >= v_10))[0]
-            idx_90_arr = np.where(in_window & (v_out >= v_90))[0]
+            # 寻找关断边沿：驱动电压 v_driver 下降到 v_start_thresh，而 vds 上升到 v_end_thresh
+            idx_start_arr = np.where(in_window & (v_driver <= v_start_thresh))[0]
+            idx_end_arr = np.where(in_window & (vds >= v_end_thresh))[0]
             
-            # 线性插值函数
-            def get_interpolated_time(idx_arr, target_v):
+            # 线性插值函数需要传入其对应的波形数组
+            def get_interpolated_time(idx_arr, target_v, wave_arr):
                 if len(idx_arr) == 0:
                     return None
                 i = idx_arr[0]
                 if i == 0 or not in_window[i-1]:
                     return time[i]
                 
-                t1, v1 = time[i-1], v_out[i-1]
-                t2, v2 = time[i], v_out[i]
+                t1, v1 = time[i-1], wave_arr[i-1]
+                t2, v2 = time[i], wave_arr[i]
                 
                 if v2 == v1:
                     return t2
-                # 线性插值公式： t = t1 + (v_target - v1) * (t2 - t1) / (v2 - v1)
                 return t1 + (target_v - v1) * (t2 - t1) / (v2 - v1)
             
-            t_10 = get_interpolated_time(idx_10_arr, v_10)
-            t_90 = get_interpolated_time(idx_90_arr, v_90)
+            t_10 = get_interpolated_time(idx_start_arr, v_start_thresh, v_driver)
+            t_90 = get_interpolated_time(idx_end_arr, v_end_thresh, vds)
             
             if t_10 is not None and t_90 is not None:
-                rise_time = t_90 - t_10
+                # 应对可能的提前跨越异常状况，保证 t_90 在 t_10 后才算正确
+                if t_90 > t_10:
+                    rise_time = t_90 - t_10
+                else:
+                    rise_time = 0.0
                 print(f"VLoad={vload_val}V, I_Target={i_target_val}A : Voltage Rise Time (Raw) = {rise_time*1e9:.2f} ns")
             else:
                 rise_time = 0.0
-                print(f"VLoad={vload_val}V, I_Target={i_target_val}A : 未能在窗口区 {T_WINDOW_START*1e6:.2f}us~{T_WINDOW_END*1e6:.2f}us 抓取到 {v_10}V~{v_90}V 上升沿")
+                print(f"VLoad={vload_val}V, I_Target={i_target_val}A : 未能在窗口区 {T_WINDOW_START*1e6:.2f}us~{T_WINDOW_END*1e6:.2f}us 提取到上升时间")
                 
             # 保存数据供画图使用 (无论是否抓取到边沿都保存，以便 3D 图以 0 展示)
             results_data.append({
                 'vload': vload_val,
                 'i_target': i_target_val,
                 'time': time,
-                'v_out': v_out,
+                'v_out': vds, # 将 Vds 作为主展示波形
+                'v_driver': v_driver, # 带上驱动波形
                 't_10': t_10,
                 't_90': t_90,
-                'v_10': v_10,
-                'v_90': v_90,
+                'v_10': v_start_thresh,
+                'v_90': v_end_thresh,
                 'rise_time': rise_time,
                 'window': (T_WINDOW_START, T_WINDOW_END)
             })
