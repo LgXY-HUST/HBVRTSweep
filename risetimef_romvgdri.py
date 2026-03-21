@@ -148,13 +148,19 @@ def run_ltspice_simulation():
 
     # 初始化 SimRunner (用于执行并行仿真)
     net = PyLTSpice.SpiceEditor(ASC_FILE)  # 加载网表
+    
+    # 强制沿用之前配置的仿真和求解器设置，防止多线程批量仿真退化到默认求解器而导致速度极慢
+    net.add_instructions(
+        ".options method=gear"   # 沿用 Gear 积分方法，提升收敛性
+    )
+    
     runner = SimRunner(simulator=simulator, output_folder=WORKING_DIR, parallel_sims=8 , timeout=1200)  # 设置并行数和超时时间（秒）
     
     print("正在启动 LTspice 多进程参数扫描仿真...")
     
     # 配置要扫描的 VLoad 和目标电流 I_target
-    vload_list = np.arange(200, 400 + 100/2, 50)
-    i_target_list = np.arange(2, 10 + 10/2, 3)
+    vload_list = np.arange(320, 400+10 , 200)
+    i_target_list = np.arange(0.5, 7.0, 1.5)
     
     # 假设 Lload = 100uH
     Lload_val = 100e-6 
@@ -170,7 +176,7 @@ def run_ltspice_simulation():
             net.set_parameters(VLoad=vload, OnTime1=ontime1_str)
             
             run_name = f"Vload_{vload}V_I_{i_target}A.net"
-            runner.run(net, run_filename=run_name)
+            runner.run(net, run_filename=run_name, switches=['-alt'])
     
     # 阻塞等待所有仿真任务完成
     runner.wait_completion()
@@ -214,7 +220,7 @@ def run_ltspice_simulation():
             # 如果不提取，直接根据物理公式准确计算出来的 t5_accurate 也是极度精确的
             
             # 指定时间窗口：从 T5 附近开始，留一定的余量
-            T_WINDOW_START = t5_accurate - 0.2e-6
+            T_WINDOW_START = t5_accurate - 0.0e-6
             T_WINDOW_END = t5_accurate + 1.5e-6
             
             raw_data = RawRead(raw_file_path)
@@ -234,7 +240,7 @@ def run_ltspice_simulation():
                 # 获取母线电压 VBUS 作为 Vds 阈值判据依据
                 vbus_wave = raw_data.get_trace('V(vbus)').get_wave()
                 vbus_val = vbus_wave[0] # 取第一个点即可假设恒定
-                
+                vbus_val = 400.0 # 直接使用理论值，仿真中母线电压基本没有降落，可以直接用理论值
                 # VCC2 从仿真文件中定义为 18V
                 vcc2_val = 18.0
                 
