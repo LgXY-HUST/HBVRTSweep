@@ -127,6 +127,12 @@ def run_ltspice_simulation():
 
     # 初始化 SimRunner (用于执行并行仿真)
     net = PyLTSpice.SpiceEditor(ASC_FILE)  # 加载网表
+    
+    # 强制沿用之前配置的仿真和求解器设置，防止多线程批量仿真退化到默认求解器而导致速度极慢
+    net.add_instructions(
+        ".options method=gear"   # 沿用 Gear 积分方法，提升收敛性
+    )
+    
     runner = SimRunner(simulator=simulator, output_folder=WORKING_DIR, parallel_sims=8 , timeout=1200)  # 设置并行数和超时时间（秒）
     
     print("正在启动 LTspice 多进程参数扫描仿真...")
@@ -149,7 +155,7 @@ def run_ltspice_simulation():
             net.set_parameters(VLoad=vload, OnTime1=ontime1_str)
             
             run_name = f"Vload_{vload}V_I_{i_target}A.net"
-            runner.run(net, run_filename=run_name)
+            runner.run(net, run_filename=run_name, switches=['-alt'])
     
     # 阻塞等待所有仿真任务完成
     runner.wait_completion()

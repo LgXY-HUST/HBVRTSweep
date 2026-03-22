@@ -104,7 +104,7 @@ def plot_rise_time_3d(results_data):
     Z = [res['rise_time'] * 1e9 for res in results_data] # 转为 ns
     
     # 画离散点
-    scatter = ax.scatter(X, Y, Z, c=Z, cmap='coolwarm', s=100, marker='o', depthshade=False)
+    scatter = ax.scatter(X, Y, Z, c=Z, cmap='coolwarm', s=20, marker='o', depthshade=False)
     fig_3d.colorbar(scatter, ax=ax, label='Rise Time (ns)', pad=0.1)
     
     # 至少3个点时绘制曲面
@@ -159,8 +159,8 @@ def run_ltspice_simulation():
     print("正在启动 LTspice 多进程参数扫描仿真...")
     
     # 配置要扫描的 VLoad 和目标电流 I_target
-    vload_list = np.arange(320, 400+10 , 200)
-    i_target_list = np.arange(0.5, 7.0, 1.5)
+    vload_list = np.arange(20, 21 , 1)
+    i_target_list = np.arange(0.1, 2.2, 0.3)
     
     # 假设 Lload = 100uH
     Lload_val = 100e-6 
@@ -176,8 +176,8 @@ def run_ltspice_simulation():
             net.set_parameters(VLoad=vload, OnTime1=ontime1_str)
             
             run_name = f"Vload_{vload}V_I_{i_target}A.net"
+            # runner.run(net, run_filename=run_name, switches=['-alt'])
             runner.run(net, run_filename=run_name, switches=['-alt'])
-    
     # 阻塞等待所有仿真任务完成
     runner.wait_completion()
     print("扫描仿真全部完成！")
@@ -304,7 +304,7 @@ def run_ltspice_simulation():
             })
 
     # 根据提取的结果选择调用画图函数
-    plot_waveforms(results_data)
+    # plot_waveforms(results_data)
     plot_rise_time_3d(results_data)
     plt.show()
 
