@@ -90,7 +90,7 @@ def plot_waveforms(results_data):
 
 def plot_rise_time_3d(results_data):
     """
-    用一张三维图绘制上升时间 (X=目标电流, Y=VLoad, Z=上升时间)。
+    用一张三维图绘制上升时间 (X=实际电流, Y=VLoad, Z=上升时间)。使用插值产生平滑曲面。
     """
     if not results_data:
         print("没有可用于绘图的仿真结果数据")
@@ -99,25 +99,42 @@ def plot_rise_time_3d(results_data):
     fig_3d = plt.figure("3D_Rise_Time_Analysis", figsize=(10, 8))
     ax = fig_3d.add_subplot(111, projection='3d')
     
-    X = [res['i_target'] for res in results_data]
-    Y = [res['vload'] for res in results_data]
-    Z = [res['rise_time'] * 1e9 for res in results_data] # 转为 ns
+    # 获取实际测量的电流和电压数据
+    X = np.array([res['i_actual'] for res in results_data])
+    Y = np.array([res['vload'] for res in results_data])
+    Z = np.array([res['rise_time'] * 1e9 for res in results_data]) # 转为 ns
     
     # 画离散点
-    scatter = ax.scatter(X, Y, Z, c=Z, cmap='coolwarm', s=20, marker='o', depthshade=False)
+    scatter = ax.scatter(X, Y, Z, c=Z, cmap='coolwarm', s=20, marker='o', depthshade=False, label='Simulated Points')
     fig_3d.colorbar(scatter, ax=ax, label='Rise Time (ns)', pad=0.1)
     
-    # 至少3个点时绘制曲面
-    if len(X) >= 3:
+    # 当有足够且多维数据点时（X和Y的独立值均大于等于2），通过网格插值绘制连续曲面以便填充无数据点区域
+    if len(X) >= 4 and len(np.unique(X)) >= 2 and len(np.unique(Y)) >= 2:
         try:
-            ax.plot_trisurf(X, Y, Z, cmap='coolwarm', alpha=0.6, edgecolor='none')
-        except Exception:
-            pass
+            from scipy.interpolate import griddata
             
-    ax.set_xlabel('Target Current (A)', labelpad=10)
+            # 创建更密集的网格用于插值
+            grid_x, grid_y = np.mgrid[min(X):max(X):100j, min(Y):max(Y):100j]
+            
+            # 使用 linear 方法进行插值
+            grid_z = griddata((X, Y), Z, (grid_x, grid_y), method='linear')
+            
+            # 绘制插值生成的曲面
+            ax.plot_surface(grid_x, grid_y, grid_z, cmap='coolwarm', alpha=0.5, edgecolor='none')
+        except Exception as e:
+            print(f"曲面插值失败: {e}")
+            try:
+                # 回退到简单的三角曲面
+                ax.plot_trisurf(X, Y, Z, cmap='coolwarm', alpha=0.6, edgecolor='none')
+            except Exception as e2:
+                print(f"三角曲面绘制失败: {e2}")
+    else:
+        print("X或Y维度的独立数据点不足以生成曲面（比如扫描固定VLoad），仅显示散点。")
+            
+    ax.set_xlabel('Actual Current I(Rshunt) (A)', labelpad=10)
     ax.set_ylabel('VLoad (V)', labelpad=10)
     ax.set_zlabel('Rise Time (ns)', labelpad=10)
-    ax.set_title('Rise Time vs Target Current & VLoad', fontweight='bold')
+    ax.set_title('Rise Time vs Actual Current & VLoad', fontweight='bold')
     
     # 展示所有生成的图表
     # 如果单独调用这两个函数，需在外部保证最后调用 plt.show()
@@ -149,18 +166,13 @@ def run_ltspice_simulation():
     # 初始化 SimRunner (用于执行并行仿真)
     net = PyLTSpice.SpiceEditor(ASC_FILE)  # 加载网表
     
-    # 强制沿用之前配置的仿真和求解器设置，防止多线程批量仿真退化到默认求解器而导致速度极慢
-    net.add_instructions(
-        ".options method=gear"   # 沿用 Gear 积分方法，提升收敛性
-    )
-    
     runner = SimRunner(simulator=simulator, output_folder=WORKING_DIR, parallel_sims=8 , timeout=1200)  # 设置并行数和超时时间（秒）
     
     print("正在启动 LTspice 多进程参数扫描仿真...")
     
     # 配置要扫描的 VLoad 和目标电流 I_target
-    vload_list = np.arange(20, 21 , 1)
-    i_target_list = np.arange(0.1, 2.2, 0.3)
+    vload_list = np.arange(20, 380 , 40)
+    i_target_list = np.arange(0.1, 3.2, 0.3)
     
     # 假设 Lload = 100uH
     Lload_val = 100e-6 
@@ -237,6 +249,13 @@ def run_ltspice_simulation():
                 vks = raw_data.get_trace('V(vks)').get_wave()
                 v_driver = vg_dri - vks
                 
+                # 获取在准确时刻（T5）通过采样电阻上的电流（取绝对值避免负方向符号影响）
+                try:
+                    i_rshunt = raw_data.get_trace('I(Rshunt)').get_wave()
+                except Exception:
+                    i_rshunt = raw_data.get_trace('I(rshunt)').get_wave()
+                i_actual_val = abs(np.interp(t5_accurate, time, i_rshunt))
+                
                 # 获取母线电压 VBUS 作为 Vds 阈值判据依据
                 vbus_wave = raw_data.get_trace('V(vbus)').get_wave()
                 vbus_val = vbus_wave[0] # 取第一个点即可假设恒定
@@ -292,6 +311,7 @@ def run_ltspice_simulation():
             results_data.append({
                 'vload': vload_val,
                 'i_target': i_target_val,
+                'i_actual': i_actual_val,
                 'time': time,
                 'v_out': vds, # 将 Vds 作为主展示波形
                 'v_driver': v_driver, # 带上驱动波形
