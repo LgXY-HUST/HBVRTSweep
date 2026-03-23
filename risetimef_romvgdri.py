@@ -166,13 +166,13 @@ def run_ltspice_simulation():
     # 初始化 SimRunner (用于执行并行仿真)
     net = PyLTSpice.SpiceEditor(ASC_FILE)  # 加载网表
     
-    runner = SimRunner(simulator=simulator, output_folder=WORKING_DIR, parallel_sims=8 , timeout=1200)  # 设置并行数和超时时间（秒）
+    runner = SimRunner(simulator=simulator, output_folder=WORKING_DIR, parallel_sims=4 , timeout=1200)  # 设置并行数和超时时间（秒）
     
     print("正在启动 LTspice 多进程参数扫描仿真...")
     
     # 配置要扫描的 VLoad 和目标电流 I_target
-    vload_list = np.arange(20, 380 , 40)
-    i_target_list = np.arange(0.1, 3.2, 0.3)
+    vload_list = np.arange(20, 380 , 20)
+    i_target_list = np.arange(0.1, 3.2, 0.15)
     
     # 假设 Lload = 100uH
     Lload_val = 100e-6 
